@@ -6,10 +6,6 @@ This is text. This is **bold text**. This is *italic* text.
 is
 multi
 line
-bold
-_That contains
-multi
-line
-italic_**
+bold**
 
 

@@ -1,4 +1,5 @@
-from src.scanner import Scanner
+from src.ast_module.scanner import Scanner
+from src.ast_module.root_token import RootToken
 from pprint import pprint
 from pathlib import Path
 
@@ -10,7 +11,8 @@ def parse_md(path):
         print(file_content)
 
     new_scanner = Scanner(file_content)
-    root = new_scanner.tokenize()
+    root = RootToken(corrected_path)
+    root.children = new_scanner.tokenize()
     pprint(root, indent=8, width=120)
 
 
