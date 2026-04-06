@@ -1,12 +1,8 @@
-from lex_token import Token
+from .lex_token import Token
 
 class LiteralToken(Token):
-    def __init__(self, value) -> None:
-        super().__init__(value, None, None)
-        self.value = value or ""
+    def __init__(self, start, end) -> None:
+        super().__init__(None, None, start, end)
 
-    def __eq__(self, other) -> bool:
-        if not isinstance(other, LiteralToken):
-            return False
-
-        return self.value == other.value
+    def __repr__(self) -> str:
+        return f"LiteralToken(Start={self.start}, End={self.end})"

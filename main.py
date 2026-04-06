@@ -1,4 +1,5 @@
 from src.scanner import Scanner
+from pprint import pprint
 from pathlib import Path
 
 
@@ -10,7 +11,7 @@ def parse_md(path):
 
     new_scanner = Scanner(file_content)
     root = new_scanner.tokenize()
-    print(root)
+    pprint(root, indent=8, width=120)
 
 
 def main():
