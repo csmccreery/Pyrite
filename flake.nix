@@ -13,6 +13,7 @@
 			buildInputs = [
 				pkgs.python315
                 pkgs.pyright
+                pkgs.black
 				pkgs.bootdev-cli
 				pkgs.docker
 				pkgs.uv

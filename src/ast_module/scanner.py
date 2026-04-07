@@ -8,11 +8,16 @@ class Scanner:
         self.trigger_chars = [
                     '*', '-', '_', '#', '`'
                     '>', '&', '[', ']', '(',
-                    ')'
+                    ')', '!'
                 ]
         self.rules = {
-                    'header': re.compile(r'^(#+)\s'),
-                    'code_block': re.compile(r'^`{3}\n')
+                    'header': re.compile(r'^(#+)\s(?P<text>.*?)\n'),
+                    'code_block': re.compile(r'^`{3}\n(?P<text>.*?)`{3}', re.DOTALL), # re.DOTALL => let .*? look through new lines as well.
+                    'bold': re.compile(r'^\*\*(?P<text>.*?)\*\*', re.DOTALL),
+                    'italic': re.compile(r'^(\*|_)(?P<text>.*?)\1', re.DOTALL), # \1 whatever you found in the first group, match it again
+                    'link': re.compile(r'^\[(?P<text>.*?)\]\((?P<url>.*?)\)'),
+                    'wiki_link': re.compile(r'^\[\[(?P<link>.*?)(\|.*?)\]\]'),
+                    'image': re.compile(r'^!\[(?P<text>.*?)\]\((?P<url>.*?)\)')
                 }
 
 #####################################################################################
@@ -37,6 +42,8 @@ class Scanner:
                 )
 
     def tokenize(self):
+        if not self.text:
+            return None
 
         # All the stuff happens here
         block_children = self.block_parse()
@@ -245,6 +252,15 @@ class Scanner:
             search_ptr += 1
 
         return None, cursor
+
+    def handle_inline_links(self, cursor, limit):
+        pass
+
+    def handle_inline_wiki_links(self, cursor, limit):
+        pass
+
+    def handle_inline_images(self, cursor, limit):
+        pass
 
     def handle_inline_code(self, cursor, limit):
         content_start = cursor + 1
