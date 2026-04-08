@@ -2,27 +2,32 @@ from .parent_token import ParentToken, ParentTokenType
 from .literal_token import LiteralToken
 import re
 
+
 class Scanner:
     def __init__(self, text):
         self.text = text or ""
-        self.trigger_chars = [
-                    '*', '-', '_', '#', '`'
-                    '>', '&', '[', ']', '(',
-                    ')', '!'
-                ]
-        self.rules = {
-                    'header': re.compile(r'^(#+)\s(?P<text>.*?)\n'),
-                    'code_block': re.compile(r'^`{3}\n(?P<text>.*?)`{3}', re.DOTALL), # re.DOTALL => let .*? look through new lines as well.
-                    'bold': re.compile(r'^\*\*(?P<text>.*?)\*\*', re.DOTALL),
-                    'italic': re.compile(r'^(\*|_)(?P<text>.*?)\1', re.DOTALL), # \1 whatever you found in the first group, match it again
-                    'link': re.compile(r'^\[(?P<text>.*?)\]\((?P<url>.*?)\)'),
-                    'wiki_link': re.compile(r'^\[\[(?P<link>.*?)(\|.*?)\]\]'),
-                    'image': re.compile(r'^!\[(?P<text>.*?)\]\((?P<url>.*?)\)')
-                }
+        self.trigger_chars = ["*", "-", "_", "#", "`" ">", "&", "[", "]", "(", ")", "!"]
+        self.block_rules = [
+            # Match any number of #'s followed by a space and then any amount of text ending in a newline
+            ("header", re.compile(r"^(?P<header>#+)\s(?P<text>.*?)\n")),
 
-#####################################################################################
-#                            UTILITIES SECTION                                      #
-#####################################################################################
+            # Match exactly 3 `'s followed by a newline, then any amount of text (including new lines) ending in exactly 3 `'s and a newline
+            ("code_block", re.compile(r"^`{3}(?P<code_type>[a-zA-Z])?\n(?P<text>.*?)`{3}\n", re.DOTALL)),  
+
+            # Literally anything + two newlines
+            ("paragraph", re.compile(r'^(?P<text>.*?)\n\n'))
+        ]
+        self.inline_rules = [
+            ("bold", re.compile(r"^\*\*(?P<text>.*?)\*\*", re.DOTALL)),
+            ("italic", re.compile(r"^(\*|_)(?P<text>.*?)\1", re.DOTALL)), 
+            ("link", re.compile(r"^\[(?P<text>.*?)\]\((?P<url>.*?)\)")),
+            ("wiki_link", re.compile(r"^\[\[(?P<link>.*?)(?P<text>.*?)?\]\]")),
+            ("image", re.compile(r"^!\[(?P<text>.*?)\]\((?P<link>.*?)\)")),
+        ]
+
+    #####################################################################################
+    #                            UTILITIES SECTION                                      #
+    #####################################################################################
 
     def peek(self, cursor):
         if cursor + 1 < len(self.text):
@@ -34,12 +39,12 @@ class Scanner:
         # If the cursor isn't at the start of the text but the last character was a newline
         # and the current character isn't just another newline. we're good
 
-        # God this is so hideous. 
+        # God this is so hideous.
         # TODO: Fix this
         return cursor == 0 or (
-                    cursor - 1 >= 0 and 
-                    (self.text[cursor - 1] == '\n' and self.text[cursor] != '\n')
-                )
+            cursor - 1 >= 0
+            and (self.text[cursor - 1] == "\n" and self.text[cursor] != "\n")
+        )
 
     def tokenize(self):
         if not self.text:
@@ -52,9 +57,9 @@ class Scanner:
             block.children = self.inline_parse(content_start, content_end)
         return block_children
 
-#####################################################################################
-#                                BLOCK SECTION                                      #
-#####################################################################################
+    #####################################################################################
+    #                                BLOCK SECTION                                      #
+    #####################################################################################
 
     def block_parse(self):
         tokens = []
@@ -69,98 +74,76 @@ class Scanner:
                     tokens.append(new_token)
                     cursor = current_pos
             else:
-                new_token, current_pos = self.paragraph_handler(saved_pos)
+                block_match = re.match(self.block_rules[-1][1], self.text[saved_pos:])
+                new_token, current_pos = self.paragraph_handler(saved_pos, block_match)
                 if new_token:
                     tokens.append(new_token)
                     cursor = current_pos
 
             # Skip empty lines
             while cursor < len(self.text) and self.text[cursor] == '\n':
-                cursor += 1 # Still O(n) because both while loops have the same bound and move the same pointer
+                cursor += 1  # Still O(n) because both while loops have the same bound and move the same pointer
 
         return tokens
 
     def block_dispatcher(self, saved_pos):
-        # Check for header level
-        header_match = re.match(self.rules[ParentTokenType.HEADER.value], self.text[saved_pos:])
-        if header_match: # Newline -> header pattern match
-            if self.at_start_of_line(saved_pos):
-                header_count = len(header_match[1])
-                return self.header_handler(saved_pos, header_count)
-
-        code_block_match = re.match(self.rules[ParentTokenType.CODE_BLOCK.value], self.text[saved_pos:])
-        if code_block_match: # Newline -> code block pattern
-            if self.at_start_of_line(saved_pos):
-                return self.code_block_handler(saved_pos)
-
-        # Just add more regexes to catch more rules
-
-        return self.paragraph_handler(saved_pos)
-    
-    def header_handler(self, saved_pos, header_count):
-        """
-            Headers are arguably the easists to implement as they'll never
-            go across multiple lines
-        """
-        cursor = saved_pos
-        while cursor < len(self.text) and self.text[cursor] != '\n':
-            cursor += 1
-        
-        data = {'level': header_count}
-        new_block = ParentToken(
-                    token_type=ParentTokenType.HEADER,
-                    children=[],
-                    start=saved_pos + header_count + 1,
-                    end=cursor,
-                    data=data
-                )
-
-        return new_block, cursor
-
-    def code_block_handler(self, saved_pos):
-        cursor = saved_pos
-        start_pos = cursor
-        # This time all we care about is advancing whole lines until we see the next ```
-        while cursor < len(self.text) and self.text[cursor] != '\n':
-            if all([char == '`' for char in self.text[cursor + 1:cursor + 3]]):
-                # Hit the end of the block
-                new_token = ParentToken(
-                            token_type=ParentTokenType.CODE_BLOCK,
-                            children=[],
-                            start=saved_pos,
-                            end=cursor,
-                            data={}
-                        )
-                cursor += 3 # Skip past the code ticks
-                return new_token, cursor
-            cursor += 1 # Advance to the next line
+        for rule, pattern in self.block_rules:
+            block_match = re.match(pattern, self.text[saved_pos:])
+            if block_match:
+                match rule:
+                    case ParentTokenType.HEADER.value:
+                        return self.header_handler(saved_pos, block_match)
+                    case ParentTokenType.CODE_BLOCK.value:
+                        return self.code_block_handler(saved_pos, block_match)
+                    case _:
+                        return self.paragraph_handler(saved_pos, block_match)
         return None, saved_pos
 
-    def paragraph_handler(self, saved_pos):
-        # While we haven't reached an end of line, and there is another line past that
-        # Keep moving the cursor
-        cursor = saved_pos
-        start_pos = cursor
-        while cursor < len(self.text):
-            if self.text[cursor] == '\n':
-                next_char = self.peek(cursor) # If it's none, we reached the end 
-                if not next_char or next_char == '\n': # Two new lines in a row. break
+    def header_handler(self, saved_pos, block_match):
+        header, text = block_match.group('header', 'text')
+        end_pos = saved_pos + block_match.end(0)
 
-                    new_block = ParentToken(
-                                token_type=ParentTokenType.PARAGRAPH,
-                                children=[],
-                                start=saved_pos,
-                                end=cursor,
-                                data={}
-                            )
+        content_start = saved_pos + block_match.start('header')
+        content_end = saved_pos + block_match.start('header')
 
-                    return new_block, cursor
-            cursor += 1
-        return None, start_pos
+        return ParentToken(
+            token_type=ParentTokenType.HEADER,
+            children=[],
+            start=saved_pos,
+            end=end_pos,
+            data={'level', len(header)}
+        ), end_pos 
 
-#####################################################################################
-#                               INLINE SECTION                                      #
-#####################################################################################
+    def code_block_handler(self, saved_pos, block_match):
+        if block_match:
+           code_type = block_match.group('code_type')
+           end_pos = saved_pos + block_match.end('text')
+
+           return ParentToken(
+                token_type=ParentTokenType.CODE_BLOCK,
+                children=[],
+                start=saved_pos,
+                end=end_pos,
+                data={'code_type', code_type}
+            ), end_pos
+        return None, saved_pos
+
+    def paragraph_handler(self, saved_pos, block_match):
+        if block_match:
+            end_pos = saved_pos + block_match.end('text')
+
+            return ParentToken(
+                token_type=ParentTokenType.PARAGRAPH,
+                children=[],
+                start=saved_pos,
+                end=end_pos,
+                data={}
+            ), end_pos
+        return None, saved_pos
+
+    #####################################################################################
+    #                               INLINE SECTION                                      #
+    #####################################################################################
 
     def inline_parse(self, start, end):
         cursor = start
@@ -170,7 +153,7 @@ class Scanner:
 
         while cursor < end:
             if self.text[cursor] in self.trigger_chars:
-                # If this is actually a token and not someone just randomly 
+                # If this is actually a token and not someone just randomly
                 # throwing asterisks in their markdown then we do the following
                 new_token, next_pos = self.inline_dispatch(cursor, end)
                 if new_token:
@@ -190,68 +173,50 @@ class Scanner:
         return tokens
 
     def inline_dispatch(self, cursor, limit):
-        if self.text[cursor] == "*":
-            if self.text[cursor + 1] == "*":
-                return self.handle_inline_bold(cursor + 2, limit)
-
-            return self.handle_inline_italic(cursor, limit)
-
-        if self.text[cursor] == "_":
-            return self.handle_inline_italic(cursor, limit)
-
-        if self.text[cursor] == '`':
-            return self.handle_inline_code(cursor, limit)
-
-        return None, cursor 
-
-    def handle_inline_bold(self, cursor, limit):
-        content_start = cursor + 2
-        search_ptr = content_start
-
-        while search_ptr < limit:
-            if self.text[search_ptr] == '*' and self.text[search_ptr + 1] == '*':
-                content_end = search_ptr
-
-                inner_children = self.inline_parse(content_start, content_end)
-
-                new_token = ParentToken(
-                            token_type=ParentTokenType.BOLD,
-                            children=inner_children,
-                            start=content_start - 2,
-                            end=search_ptr + 2,
-                            data={}
-                        )
-
-                return new_token, search_ptr + 2
-
-            search_ptr += 1
-
+        for rule, pattern in self.inline_rules:
+            inline_match = re.match(pattern, self.text[cursor:limit])
+            if inline_match:
+                match rule:
+                    case ParentTokenType.BOLD.value:
+                        return self.handle_inline_bold(cursor, inline_match)
+                    case ParentTokenType.ITALIC.value:
+                        return self.handle_inline_italic(cursor, inline_match)
+                    case ParentTokenType.CODE.value:
+                        return self.handle_inline_code(cursor, inline_match)
         return None, cursor
 
-    def handle_inline_italic(self, cursor, limit):
-        search_char = self.text[cursor] # Is it a '_' or a '*'?
-        content_start = cursor + 1
-        search_ptr = content_start
-        
-        # While our moving pointer is less than the limit
-        while search_ptr < limit:
-            if self.text[search_ptr] == search_char:
-                content_end = search_ptr
+    def handle_inline_bold(self, cursor, inline_match):
+        end_pos = cursor + inline_match.end("text")
 
-                inner_children = self.inline_parse(content_start, content_end)
+        return ParentToken(
+            token_type=ParentTokenType.PARAGRAPH,
+            children=[],
+            start=cursor,
+            end=end_pos,
+            data={}
+        ), end_pos
 
-                new_token = ParentToken(
-                            token_type=ParentTokenType.ITALIC,
-                            children=inner_children,
-                            start=content_start - 1,
-                            end=search_ptr + 1,
-                            data={}
-                        )
-                return new_token, search_ptr + 1
+    def handle_inline_italic(self, cursor, inline_match):
+        end_pos = cursor + inline_match.end("text")
 
-            search_ptr += 1
+        return ParentToken(
+            token_type=ParentTokenType.PARAGRAPH,
+            children=[],
+            start=cursor,
+            end=end_pos,
+            data={}
+        ), end_pos
 
-        return None, cursor
+    def handle_inline_code(self, cursor, inline_match):
+        end_pos = cursor + inline_match.end("text")
+
+        return ParentToken(
+            token_type=ParentTokenType.PARAGRAPH,
+            children=[],
+            start=cursor,
+            end=end_pos,
+            data={}
+        ), end_pos
 
     def handle_inline_links(self, cursor, limit):
         pass
@@ -262,21 +227,4 @@ class Scanner:
     def handle_inline_images(self, cursor, limit):
         pass
 
-    def handle_inline_code(self, cursor, limit):
-        content_start = cursor + 1
-        search_ptr = content_start
-
-        while search_ptr < limit - 1:
-            if self.text[search_ptr] == '`':
-                content_end = search_ptr
-
-                inner_children = self.inline_parse(content_start, content_end)
-
-                new_token = ParentToken(
-                            token_type=ParentTokenType.CODE,
-                            children=inner_children,
-                            start=content_start - 1,
-                            end=search_ptr + 1,
-                            data={}
-                        )
-
+    

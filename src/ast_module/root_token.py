@@ -1,5 +1,6 @@
 from .token import Token
 
+
 class RootToken(Token):
     def __init__(self, file_path, children=None):
         super().__init__(children or [], -1, -1)
